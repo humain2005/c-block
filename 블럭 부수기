@@ -1,0 +1,269 @@
+#include <SDL.h>
+#include <iostream>
+#include <vector>
+#include <cstdlib> 
+#include <ctime> 
+
+// Screen dimension constants
+const int SCREEN_WIDTH = 800;
+const int SCREEN_HEIGHT = 600;
+
+// Ball constants
+const int BALL_SIZE = 10;
+const int INITIAL_BALL_COUNT = 1;
+
+const float SPEED_INCREMENT = 0.5f;
+
+struct Ball {
+    int x, y;
+    float velX, velY;
+};
+
+struct Paddle {
+    int x, y;
+    float velX;
+};
+
+struct Brick {
+    int x, y;
+    bool destroyed;
+    bool isSpecial;
+};
+
+struct MultiPaddle {
+    int x, y;
+    float velX;
+};
+
+std::vector<Brick> bricks;
+std::vector<Ball> balls;
+std::vector<MultiPaddle> multiPaddles; // 멀티 패들을 저장하는 벡터
+Paddle paddle;
+int activeBallCount = INITIAL_BALL_COUNT;
+
+void init() {
+    paddle = { SCREEN_WIDTH / 2 - 50, SCREEN_HEIGHT - 30, 0.0f };
+    bricks.clear();
+    for (int i = 0; i < 5; ++i) {
+        for (int j = 0; j < 16; ++j) {
+            bool isSpecial = (rand() % 10 == 0);
+            bricks.push_back({ j * 55 + 35, i * 25 + 50, false, isSpecial });
+        }
+    }
+    balls.clear();
+    for (int i = 0; i < activeBallCount; ++i) {
+        int randomX = rand() % (SCREEN_WIDTH - BALL_SIZE);
+        balls.push_back({ randomX, SCREEN_HEIGHT / 2, 2.0f, 2.0f });
+    }
+    multiPaddles.clear(); // 멀티 패들 벡터 초기화
+}
+
+bool checkCollision(int x1, int y1, int w1, int h1, int x2, int y2, int w2, int h2) {
+    return x1 < x2 + w2 && x1 + w1 > x2 && y1 < y2 + h2 && y1 + h1 > y2;
+}
+
+void resetBall() {
+    int randomX = rand() % (SCREEN_WIDTH - BALL_SIZE);
+    balls.push_back({ randomX, SCREEN_HEIGHT / 2, 2.0f, 2.0f });
+    activeBallCount++;
+}
+
+void adjustSpeed(float factor) {
+    for (auto& ball : balls) {
+        ball.velX *= factor;
+        ball.velY *= factor;
+    }
+    paddle.velX *= factor;
+    for (auto& multiPaddle : multiPaddles) {
+        multiPaddle.velX *= factor;
+    }
+}
+
+void update() {
+    for (auto& ball : balls) {
+        ball.x += static_cast<int>(ball.velX);
+        ball.y += static_cast<int>(ball.velY);
+        if (ball.x <= 0 || ball.x + BALL_SIZE >= SCREEN_WIDTH) {
+            ball.velX = -ball.velX;
+        }
+        if (ball.y <= 0) {
+            ball.velY = -ball.velY;
+        }
+        if (checkCollision(ball.x, ball.y, BALL_SIZE, BALL_SIZE, paddle.x, paddle.y, 100, 10)) {
+            ball.velY = -ball.velY;
+        }
+        for (auto& multiPaddle : multiPaddles) {
+            if (checkCollision(ball.x, ball.y, BALL_SIZE, BALL_SIZE, multiPaddle.x, multiPaddle.y, 100, 10)) {
+                ball.velY = -ball.velY;
+            }
+        }
+        for (auto& brick : bricks) {
+            if (!brick.destroyed && checkCollision(ball.x, ball.y, BALL_SIZE, BALL_SIZE, brick.x, brick.y, 50, 20)) {
+                ball.velY = -ball.velY;
+                if (brick.isSpecial) {
+                    resetBall();
+                }
+                brick.destroyed = true;
+                break;
+            }
+        }
+        if (ball.y + BALL_SIZE >= SCREEN_HEIGHT) {
+            activeBallCount--;
+            balls.erase(std::remove_if(balls.begin(), balls.end(), [](const Ball& b) { return b.y + BALL_SIZE >= SCREEN_HEIGHT; }), balls.end());
+            if (activeBallCount <= 0) {
+                init();
+                activeBallCount = INITIAL_BALL_COUNT;
+            }
+        }
+    }
+    paddle.x += static_cast<int>(paddle.velX);
+    if (paddle.x < 0) {
+        paddle.x = 0;
+    }
+    if (paddle.x + 100 > SCREEN_WIDTH) {
+        paddle.x = SCREEN_WIDTH - 100;
+    }
+
+    // 멀티 패들 이동 로직 추가
+    for (auto& multiPaddle : multiPaddles) {
+        multiPaddle.x += static_cast<int>(multiPaddle.velX);
+        if (multiPaddle.x < 0) {
+            multiPaddle.x = 0;
+        }
+        if (multiPaddle.x + 100 > SCREEN_WIDTH) {
+            multiPaddle.x = SCREEN_WIDTH - 100;
+        }
+    }
+}
+
+void render(SDL_Renderer* renderer) {
+    SDL_SetRenderDrawColor(renderer, 0x00, 0x00, 0x00, 0xFF);
+    SDL_RenderClear(renderer);
+
+    for (const auto& ball : balls) {
+        SDL_Rect ballRect = { ball.x, ball.y, BALL_SIZE, BALL_SIZE };
+        SDL_SetRenderDrawColor(renderer, 0xFF, 0xFF, 0xFF, 0xFF);
+        SDL_RenderFillRect(renderer, &ballRect);
+    }
+
+    SDL_Rect paddleRect = { paddle.x, paddle.y, 100, 10 };
+    SDL_SetRenderDrawColor(renderer, 0xFF, 0xFF, 0xFF, 0xFF);
+    SDL_RenderFillRect(renderer, &paddleRect);
+
+    for (const auto& brick : bricks) {
+        if (!brick.destroyed) {
+            if (brick.isSpecial) {
+                SDL_SetRenderDrawColor(renderer, 0x00, 0xFF, 0x00, 0xFF);
+            }
+            else {
+                SDL_SetRenderDrawColor(renderer, 0xFF, 0x00, 0x00, 0xFF);
+            }
+            SDL_Rect brickRect = { brick.x, brick.y, 50, 20 };
+            SDL_RenderFillRect(renderer, &brickRect);
+        }
+    }
+
+    // 멀티 패들 렌더링 추가
+    for (const auto& multiPaddle : multiPaddles) {
+        SDL_Rect multiPaddleRect = { multiPaddle.x, multiPaddle.y, 100, 10 }; // 멀티 패들 크기는 100x10으로 가정
+        SDL_SetRenderDrawColor(renderer, 0xFF, 0xFF, 0x00, 0xFF); // 노란색으로 설정
+        SDL_RenderFillRect(renderer, &multiPaddleRect);
+    }
+
+    SDL_RenderPresent(renderer);
+}
+
+int main(int argc, char* args[]) {
+    if (SDL_Init(SDL_INIT_VIDEO) < 0) {
+        std::cerr << "SDL could not initialize! SDL_Error: " << SDL_GetError() << std::endl;
+        return -1;
+    }
+
+    SDL_Window* window = SDL_CreateWindow("Brick Breaker", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, SCREEN_WIDTH, SCREEN_HEIGHT, SDL_WINDOW_SHOWN);
+    if (window == nullptr) {
+        std::cerr << "Window could not be created! SDL_Error: " << SDL_GetError() << std::endl;
+        SDL_Quit();
+        return -1;
+    }
+
+    SDL_Renderer* renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED);
+    if (renderer == nullptr) {
+        std::cerr << "Renderer could not be created! SDL_Error: " << SDL_GetError() << std::endl;
+        SDL_DestroyWindow(window);
+        SDL_Quit();
+        return -1;
+    }
+
+    srand(time(nullptr));
+
+    bool quit = false;
+    SDL_Event e;
+    init();
+
+    while (!quit) {
+        while (SDL_PollEvent(&e) != 0) {
+            if (e.type == SDL_QUIT) {
+                quit = true;
+            }
+            else if (e.type == SDL_KEYDOWN) {
+                switch (e.key.keysym.sym) {
+                case SDLK_LEFT:
+                    paddle.velX = -6.0f;
+                    break;
+                case SDLK_RIGHT:
+                    paddle.velX = 6.0f;
+                    break;
+                case SDLK_r:
+                    resetBall(); // R 키가 눌리면 공을 다시 생성합니다.
+                    break;
+                case SDLK_m: // "M" 키를 눌렀을 때 멀티 패들 생성
+                    multiPaddles.push_back({ paddle.x, paddle.y, 0.0f }); // 기존 패들과 동일한 위치에 멀티 패들 생성
+                    break;
+                case SDLK_a: // "A" 키를 눌렀을 때 멀티 패들 왼쪽으로 이동
+                    if (!multiPaddles.empty()) {
+                        multiPaddles.back().velX = -6.0f;
+                    }
+                    break;
+                case SDLK_d: // "D" 키를 눌렀을 때 멀티 패들 오른쪽으로 이동
+                    if (!multiPaddles.empty()) {
+                        multiPaddles.back().velX = 6.0f;
+                    }
+                    break;
+                case SDLK_s: // "S" 키를 눌렀을 때 게임 초기화
+                    init();
+                    break;
+                case SDLK_q: // "Q" 키를 눌렀을 때 속도 증가
+                    adjustSpeed(1.1f);
+                    break;
+                case SDLK_w: // "W" 키를 눌렀을 때 속도 감소
+                    adjustSpeed(0.9f);
+                    break;
+                }
+            }
+            else if (e.type == SDL_KEYUP) {
+                switch (e.key.keysym.sym) {
+                case SDLK_LEFT:
+                case SDLK_RIGHT:
+                    paddle.velX = 0.0f;
+                    break;
+                case SDLK_a:
+                case SDLK_d:
+                    if (!multiPaddles.empty()) {
+                        multiPaddles.back().velX = 0.0f;
+                    }
+                    break;
+                }
+            }
+        }
+
+        update();
+        render(renderer);
+        SDL_Delay(10);
+    }
+
+    SDL_DestroyRenderer(renderer);
+    SDL_DestroyWindow(window);
+    SDL_Quit();
+
+    return 0;
+}
